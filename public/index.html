@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Крестики-Нолики</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; }
+        #game_page { display: none; margin-top: 20px; }
+        table { margin: 0 auto; border-collapse: collapse; }
+        td { width: 60px; height: 60px; border: 1px solid #000; font-size: 2em; cursor: pointer; }
+        #messages { margin-top: 20px; height: 100px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; }
+        #game_info { margin-top: 10px; }
+        #turn_status { margin-top: 10px; font-size: 1.2em; font-weight: bold; }
+        #gameOverMessage {
+            display: none;
+            position: fixed;
+            top: 30%;        /* Вместо 50%, чтобы окно было выше */
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #eee;
+            padding: 40px;   /* Увеличенный внутренний отступ */
+            border: 2px solid #333;
+            z-index: 9999;
+            width: 400px;    /* Можно задать желаемую ширину */
+            height: 200px;   /* Или автоматическую, если не хотите фиксировать высоту */
+            box-sizing: border-box; /* Чтобы padding + width сочетались корректно */
+        }
+
+        /* Текстовое наполнение */
+        #gameOverText {font-size: 1.2em; /* Чуть больше шрифт */}
+    </style>
+</head>
+<body>
+    <h1>Крестики-Нолики</h1>
+
+    <!-- Блок авторизации -->
+    <div id="auth" style="display: block;">
+        <h2>Вход</h2>
+        <input type="text" id="login_username" placeholder="Имя пользователя">
+        <input type="password" id="login_password" placeholder="Пароль">
+        <button onclick="login()">Войти</button>
+
+        <h2>Регистрация</h2>
+        <input type="text" id="reg_username" placeholder="Имя пользователя">
+        <input type="password" id="reg_password" placeholder="Пароль">
+        <button onclick="register()">Зарегистрироваться</button>
+    </div>
+
+    <!-- Блок списка активных игр -->
+    <div id="list_games_section" style="display: none;">
+        <h3>Список активных игр</h3>
+        <table id="games_table" border="1">
+            <thead>
+                <tr>
+                    <th>ID игры</th>
+                    <th>Создатель</th>
+                    <th>Статус</th>
+                </tr>
+            </thead>
+            <tbody id="games_table_body">
+                <!-- Записи о каждой игре будут добавляться сюда -->
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Блок игрового процесса -->
+    <div id="game_page" style="display: none;">
+        <h3>Добро пожаловать, <span id="username_display"></span></h3>
+
+        <!-- Создание игры -->
+        <h3>Создать игру</h3>
+        <label for="board_size">Размер поля:</label>
+        <select id="board_size">
+            <option value="2">2x2</option>
+            <option value="3" selected>3x3</option>
+            <option value="4">4x4</option>
+            <option value="5">5x5</option>
+            <option value="6">6x6</option>
+            <option value="7">7x7</option>
+            <option value="8">8x8</option>
+            <option value="9">9x9</option>
+            <option value="10">10x10</option>
+        </select>
+        <button onclick="createGame()">Создать игру</button>
+
+        <!-- Присоединение к игре -->
+        <div id="join_game_section" style="margin-top: 10px;">
+            <input type="number" id="join_game_id" placeholder="ID игры">
+            <button onclick="joinGame()">Присоединиться к игре</button>
+        </div>
+
+        <!-- Информация об игре -->
+        <div id="game_info" style="margin-top: 10px;"></div>
+
+        <!-- Игровое поле -->
+        <div id="game_board" style="margin-top: 10px;"></div>  
+
+        <!-- Статус хода -->
+        <div id="turn_status" style="margin-top: 10px; font-size: 1.2em; font-weight: bold;"></div>
+
+        <div id="exit_section" style="display:none; margin-top:20px;">
+            <button onclick="exitGame()">Выйти из игры</button>
+        </div>
+        
+        <div id="gameOverMessage"
+            style="display:none; position: fixed; top: 50%; left: 50%;
+                    transform:translate(-50%, -50%); background: #ff0090; padding: 30px;
+                    border: 2px solid #333333; z-index:9999 ;">
+            <p id="gameOverText"></p> 
+            <button onclick="closeGameOver()" style="background: #0015ff;">Ок</button>
+        </div>
+
+        <div id="chat_section" style="display: none; position: fixed; right: 0; top: 0; width: 150px; height: 50%; border-left: 1px solid #ccc; background-color: #f9f9f9; padding: 5px;">
+            <h4>Чат</h4>
+            <div id="chat_messages" style="height: calc(100% - 50px); overflow-y: auto; border: 1px solid #ddd; padding: 5px; background-color: #fff; font-size: 0.9em;">
+                <!-- Сообщения чата -->
+            </div>
+            <div style="margin-top: 5px;">
+                <input type="text" id="chat_input" placeholder="Введите сообщение..." style="width: calc(100% - 40px); font-size: 0.9em;">
+                <button onclick="sendChatMessage()" style="width: 30px; font-size: 0.9em;">OK</button>
+            </div>
+        </div>
+        
+        <button onclick="logout()">Выйти</button>
+    </div>
+
+    <script>
+        let ws;
+        let isLoggedIn = false; // Флаг состояния авторизации
+        let currentUsername = ''; // Текущее имя пользователя
+        let currentGameId = null; // Текущий ID игры
+        let playerSymbol = null; // Символ игрока ('X' или 'O')
+        let isPlayerTurn = false; // Флаг, чей сейчас ход
+        let clientId = null; // Уникальный ID клиента
+        let currentBoard = []; // Двумерный массив для игрового поля
+        let registrationAlertShown = false;
+        let autoRefreshInterval = null;
+        let lastMove = null; // Необходимо для отката хода
+
+        function connectWebSocket() {
+            ws = new WebSocket(`ws://${window.location.host}`);
+
+            ws.onopen = () => {
+                console.log('WebSocket соединение установлено');
+            };
+
+            ws.onmessage = (event) => {
+                const rawMsg = event.data.trim();
+                console.log('Получено сообщение от сервера:', rawMsg);
+
+                // Разбиваем сообщение на строки
+                const lines = rawMsg.split('\n').filter(line => line.trim().length > 0);
+
+                // Переменная для отслеживания, что мы обрабатываем LIST_GAMES
+                let isHandlingListGames = false;
+                let listGamesData = [];
+
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i].trim(); // Используем отдельную переменную
+
+                    console.log("Обработка строки:", line);
+
+                    if (isHandlingListGames) {
+                        if (line === 'END') {
+                            // Завершаем обработку списка игр
+                            populateGamesTable(listGamesData);
+                            isHandlingListGames = false;
+                            listGamesData = [];
+                        } else {
+                            // Добавляем игру в массив
+                            const parts = line.split(' ');
+                            if (parts.length >= 3) {
+                                const gameId = parts[0];
+                                const creator = parts[1];
+                                const status = parts[2];
+                                listGamesData.push({ gameId, creator, status });
+                            }
+                        }
+                        continue; // Переходим к следующей строке
+                    }
+
+                    if (line.startsWith("OK Registered") && !registrationAlertShown) {
+                        // Очистка полей регистрации
+                        document.getElementById('reg_username').value = '';
+                        document.getElementById('reg_password').value = '';
+                        alert('Регистрация успешна! Теперь залогиньтесь.');
+                        registrationAlertShown = true;
+                    } else if (line.startsWith("OK LoggedIn")) {
+                        isLoggedIn = true;
+                        currentUsername = document.getElementById('login_username').value;
+                        document.getElementById('username_display').innerText = currentUsername;
+                        showChat();
+                        document.getElementById('auth').style.display = 'none';
+                        document.getElementById('game_page').style.display = 'block';
+                        document.getElementById('list_games_section').style.display = 'block';
+                        startAutoRefreshGames();
+                        console.log("Пользователь вошёл в систему и список игр отображён.");
+                    } else if (line.startsWith("OK GameCreated")) {
+                        // Ожидаемый формат: "OK GameCreated. GameID - 2 UID - 10"
+                        const parts = line.split(' ');
+                        document.getElementById('gameOverMessage').style.display = 'none';
+                        document.getElementById('exit_section').style.display = 'block';
+                        console.log("Parts:", parts);
+                        if (parts.length >= 8) { // Увеличено до 8 для доступа к parts[7]
+                            const gameId = parts[4]; // "2"
+                            const client_id = parts[7]; // "10"
+                            currentGameId = gameId;
+                            playerSymbol = 'X'; 
+                            isPlayerTurn = true; 
+
+                            const gameInfo = document.getElementById('game_info');
+                            gameInfo.innerHTML = `<strong>ID игры:</strong> ${gameId} <br> <strong>Ваш символ:</strong> ${playerSymbol} 
+                                                <br> <strong>Сейчас ваш ход</strong>`;
+
+                            
+                            const size = parseInt(document.getElementById('board_size').value, 10);
+                            //initializeGameBoard(size);
+                            //renderGameBoard(size);
+                            //initializeGameBoard(size);
+                            //renderUpdatedGameBoard(size, currentBoard);
+                            console.log(currentBoard);
+
+                            document.getElementById('join_game_section').style.display = 'none';
+                            document.getElementById('list_games_section').style.display = 'none'; // Скрываем список активных игр
+                            console.log("Список активных игр скрыт после создания игры.");
+                            stopAutoRefreshGames();
+                        } else {
+                            console.error('Некорректный формат сообщения:', line);
+                        }
+                    } else if (line.startsWith("OK GameJoined")) {
+                        // Ожидаемый формат: "OK GameJoined. GameID - 2 UID - 10 SIZE - 4"
+                        const parts = line.split(' ');
+                        console.log("Parts:", parts);
+                        document.getElementById('exit_section').style.display = 'block';
+                        if (parts.length >= 5) { // Убедитесь, что достаточное количество частей
+                            const gameId = parts[4]; // "2"
+                            const client_id = parts[7]; // "10"
+                            const sizeStr = parts[10];
+                            const size = parseInt(sizeStr, 10);
+                            currentGameId = gameId;
+                            playerSymbol = 'O'; 
+                            isPlayerTurn = false; 
+                            console.log(size);
+                           
+                            initializeGameBoard(size);
+                            renderUpdatedGameBoard(size, currentBoard);
+                            console.log(currentBoard);
+
+                            const gameInfo = document.getElementById('game_info');
+                            gameInfo.innerHTML = `<strong>ID игры:</strong> ${gameId} <br> <strong>Ваш символ:</strong> ${playerSymbol} <br><strong>Сейчас ход противника</strong> `;
+                            
+                            
+                            document.getElementById('join_game_section').style.display = 'none';
+                            document.getElementById('list_games_section').style.display = 'none'; // Скрываем список активных игр
+                            console.log("Список активных игр скрыт после присоединения к игре.");
+                            stopAutoRefreshGames();
+
+
+                            ws.send(`START_GAME ${gameId}`);
+                        } else {
+                            console.error('Некорректный формат сообщения:', line);
+                        }
+                    } else if (line.startsWith("UPDATE_BOARD")) {
+                        const parts = line.split(' ');
+                        const gameId = parts[1];
+                        const row = parseInt(parts[2], 10);
+                        const col = parseInt(parts[3], 10);
+                        const symbol = parts[4];
+
+                        console.log(`Обновление клетки. Game ID: ${gameId}, (${row}, ${col}) -> ${symbol}`);
+
+                        // Обновляем локальное состояние
+                        if (currentBoard[row] && currentBoard[row][col] !== undefined) {
+                            currentBoard[row][col] = symbol;
+
+                            // Обновляем только нужную ячейку на странице
+                            const gameBoardContainer = document.getElementById('game_board');
+                            const table = gameBoardContainer.querySelector('table');
+                            if (table) {
+                                const targetRow = table.rows[row];
+                                if (targetRow) {
+                                    const targetCell = targetRow.cells[col];
+                                    if (targetCell) {
+                                        targetCell.innerText = symbol;
+                                        targetCell.style.color = "black"; // Возвращаем цвет
+                                    }
+                                }
+                            }
+                        } else {
+                            console.error("Некорректные координаты или состояние доски.");
+                        }
+                    } else if (line.startsWith("MOVE")) {
+                        // Формат: MOVE <game_id> <player_symbol> <row> <col>
+                        const parts = line.split(' ');
+                        if (parts.length >= 5) {
+                            const gameId = parts[1];
+                            const symbol = parts[2];
+                            const row = parseInt(parts[3], 10);
+                            const col = parseInt(parts[4], 10);
+
+                            if (gameId !== currentGameId) return;
+
+                            updateCell(row, col, symbol);
+
+                            if (symbol !== playerSymbol) {
+                                isPlayerTurn = true;
+                                alert('Ваш ход!');
+                                updateTurnStatus('ваш');
+                            } else {
+                                isPlayerTurn = false;
+                                updateTurnStatus('оппонента');
+                            }
+                        } else {
+                            console.error('Некорректный формат сообщения MOVE:', line);
+                        }
+                    } else if (line.startsWith("OK MoveAccepted")) {
+                        console.log("Ход подтверждён сервером.");
+
+                        // Обновляем локальное состояние после подтверждения
+                        if (lastMove) {
+                            currentBoard[lastMove.row][lastMove.col] = playerSymbol;
+                            lastMove.cell.style.color = "black"; // Устанавливаем окончательный цвет
+                            lastMove = null; // Сбрасываем временный ход
+                        }
+                    } else if (line.startsWith("START_GAME")) {
+                        const parts = line.split(' ');
+                        const gameId = parts[1];
+                        if (gameId === currentGameId) {
+                            const size = parseInt(document.getElementById('board_size').value, 10);
+                            initializeGameBoard(size);
+                            renderUpdatedGameBoard(size, currentBoard);
+                            console.log("Игра началась, поле отрисовано.");
+                        }
+                    } else if (line.startsWith("ERR InvalidMove")) {
+                        console.log("Сервер отклонил ход, откат изменений.");
+
+                        // Откат состояния ячейки
+                        if (lastMove) {
+                            lastMove.cell.innerText = ' '; // Очищаем временно закрашенную ячейку
+                            lastMove.cell.style.color = "black";
+                            lastMove = null; // Сбрасываем временный ход
+                        }
+
+                        isPlayerTurn = true; // Вернуть ход игроку
+                        updateTurnStatus('ваш');
+                    } else if (line.startsWith("NEXT_PLAYER")) {
+                        // Формат: NEXT_PLAYER <player_username>
+                        const parts = line.split(' ');
+                        if (parts.length >= 2) {
+                            const nextPlayer = parts[1];
+                            console.log(`Следующий игрок: ${nextPlayer}`);
+                            console.log(`Текущий игрок: ${currentUsername}`);
+
+                            const turnStatusElement = document.getElementById('turn_status');
+                            if (nextPlayer === currentUsername) {
+                                isPlayerTurn = true; // Это твой ход
+                                turnStatusElement.innerText = "Ваш ход!";
+                                turnStatusElement.style.color = "green";
+                            } else {
+                                isPlayerTurn = false; // Ход оппонента
+                                turnStatusElement.innerText = `Ход оппонента (${nextPlayer})`;
+                                turnStatusElement.style.color = "red";
+                            }
+                        } else {
+                            console.error('Некорректный формат сообщения NEXT_PLAYER:', line);
+                        }
+                    } else if (line.startsWith("LIST_GAMES")) {
+                        // Начинаем обработку списка игр
+                        isHandlingListGames = true;
+                        listGamesData = [];
+                        continue; // Переходим к следующей строке
+                    } else if (line.startsWith("GAME_OVER")) {
+                        // Формат: GAME_OVER <game_id> <result> <winner>
+                        const parts = line.split(' ');
+                        console.log("Parts:", parts);
+                        if (parts.length >= 6) { // Убедитесь, что достаточное количество частей
+                            const gameId = parts[5];
+                            const result = parts[1];
+                            const winner = parts[2];
+
+                            if (gameId !== currentGameId) return;
+
+                            if (result === 'WIN') {
+                                showGameOverMessage(`Игра завершена!\nПобедил игрок: ${winner}\nID игры: ${gameId}`);
+                            } else {
+                                showGameOverMessage(`Игра завершена!\nНичья!\nID игры: ${gameId}`);
+                            }
+                            const turnStatusElement = document.getElementById('turn_status');
+                            turnStatusElement.innerText = '';
+                            turnStatusElement.style.color = '';
+
+                            resetGame();
+                        } else {
+                            console.error('Некорректный формат сообщения GAME_OVER:', line);
+                        }
+                    } else if (line.startsWith("CHAT")) {
+                        const parts = line.split(' ');
+                        console.log(parts);
+                        const sender = parts[1]; // Имя отправителя
+                        const message = parts.slice(2).join(' '); // Сообщение
+
+                        const chatContainer = document.getElementById('chat_messages');
+                        const newMessage = document.createElement('div');
+
+                        if (sender === currentUsername){
+                            newMessage.innerHTML = `<strong>Вы:</strong> ${message}`;
+                        } else {
+                            newMessage.innerHTML = `<strong>${sender}:</strong> ${message}`;
+                        }
+                        chatContainer.appendChild(newMessage);
+
+                        // Автопрокрутка вниз
+                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                    } else if (line.startsWith("ERR")) {
+                        alert("Ошибка: " + line);
+                    } else {
+                        // Обработка других сообщений
+                        console.log(`Необработанное сообщение: ${line}`);
+                    }
+                }
+
+                // После обработки всех строк, если был процесс обработки LIST_GAMES, то выводим таблицу
+                if (listGamesData.length > 0) {
+                    populateGamesTable(listGamesData);
+                }
+            };
+
+            ws.onclose = () => console.log('WebSocket соединение закрыто');
+            ws.onerror = (error) => {
+                console.error('WebSocket ошибка:', error);
+                alert('Произошла ошибка WebSocket соединения. Проверьте консоль для подробностей.');
+            };
+        }
+
+        function register() {
+            const username = document.getElementById('reg_username').value.trim();
+            const password = document.getElementById('reg_password').value.trim();
+            if (username && password) {
+                ws.send(`REGISTER ${username} ${password}`);
+                console.log(`Отправлена команда регистрации: REGISTER ${username} ${password}`);
+            } else {
+                alert('Введите имя пользователя и пароль для регистрации.');
+            }
+        }
+
+        function requestGameList() {
+            if (!currentGameId) { 
+                // Если не состоим в игре - отправляем LIST_GAMES
+                ws.send("LIST_GAMES");
+                console.log("Отправлена команда запроса списка игр: LIST_GAMES");
+            }
+        }
+
+        function startAutoRefreshGames() {
+            if (!autoRefreshInterval) {
+                autoRefreshInterval = setInterval(requestGameList, 5000); // каждые 5 секунд
+                // Немного сразу запрашиваем список
+                requestGameList();
+                console.log("Запущено автообновление списка игр каждые 5 секунд.");
+            }
+        }
+
+        function stopAutoRefreshGames() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+                console.log("Остановлено автообновление списка игр.");
+            }
+        }
+
+        function showChat() {
+            document.getElementById('chat_section').style.display = 'block';
+            console.log("Чат показан.");
+        }
+
+        function hideChat() {
+            document.getElementById('chat_section').style.display = 'none';
+            console.log("Чат скрыт.");
+            //document.getElementById('chat_messages').innerHTML = ''; // Очищаем чат (опционально)
+        }
+
+        function showGameOverMessage(message) {
+            const msgDiv = document.getElementById('gameOverMessage');
+            const msgText = document.getElementById('gameOverText');
+
+            msgText.innerText = message;
+            msgDiv.style.display = 'block';
+            console.log("Показано сообщение об окончании игры:", message);
+        }
+
+        function closeGameOver() {
+            document.getElementById('gameOverMessage').style.display = 'none';
+            console.log("Сообщение об окончании игры закрыто.");
+        }
+
+        function sendChatMessage() {
+            const input = document.getElementById('chat_input');
+            const message = input.value.trim();
+            console.log("Отправка сообщения в чат:", message);
+
+            if (message) {
+                ws.send("CHAT " +  message);
+                input.value = ''; // Очищаем поле ввода
+            } else {
+                alert("Введите сообщение или убедитесь, что вы в игре.");
+            }
+        }
+
+
+        function login() {
+            const username = document.getElementById('login_username').value.trim();
+            const password = document.getElementById('login_password').value.trim();
+            if (username && password) {
+                ws.send(`LOGIN ${username} ${password}`);
+                console.log(`Отправлена команда входа: LOGIN ${username} ${password}`);
+            } else {
+                alert('Введите имя пользователя и пароль для входа.');
+            }
+        }
+
+        function exitGame() {
+            if (!currentGameId) {
+                alert("Вы не находитесь в игре.");
+                return;
+            }
+
+            // Отправляем серверу команду выхода из игры
+            ws.send(`EXIT_GAME ${currentGameId}`);
+            console.log(`Отправлена команда выхода из игры: EXIT_GAME ${currentGameId}`);
+
+            // Сбрасываем локальные переменные
+            currentGameId = null;
+            playerSymbol = null;
+            isPlayerTurn = false;
+            currentBoard = [];
+
+            startAutoRefreshGames();
+
+            // Очищаем интерфейс
+            document.getElementById('game_info').innerHTML = '';
+            document.getElementById('game_board').innerHTML = '';
+            document.getElementById('turn_status').innerText = '';
+            document.getElementById('exit_section').style.display = 'none'; // Скрываем кнопку выхода
+            // document.getElementById('restart_section').style.display = 'none'; // Скрываем рестарт (если есть)
+            document.getElementById('join_game_section').style.display = 'block'; // Показываем выбор игр
+            document.getElementById('list_games_section').style.display = 'block'; // Показываем список игр
+            document.getElementById('game_page').style.display = 'block';
+            hideChat();
+            alert("Вы вышли из игры.");
+            console.log("Пользователь вышел из игры.");
+        }
+
+
+        function createGame() {
+            const size = document.getElementById('board_size').value;
+            if (size) {
+                ws.send(`CREATE_GAME ${size}`);
+                console.log(`Отправлена команда создания игры: CREATE_GAME ${size}`);
+                // Отрисовка игрового поля произойдёт после получения ответа от сервера
+            } else {
+                alert('Выберите размер игрового поля.');
+            }
+        }
+
+        function joinGame() {
+            const gameId = document.getElementById('join_game_id').value.trim();
+            if (gameId) {
+                ws.send(`JOIN_GAME ${gameId}`);
+                console.log(`Отправлена команда присоединения к игре: JOIN_GAME ${gameId}`);
+                // Отрисовка игрового поля произойдёт после получения ответа от сервера
+            } else {
+                alert('Введите ID игры.');
+            }
+        }
+
+        function logout() {
+            if (!isLoggedIn) return;
+            isLoggedIn = false;
+            currentUsername = '';
+            currentGameId = null;
+            playerSymbol = null;
+            isPlayerTurn = false;
+            ws.send('LOGOUT');
+            console.log("Отправлена команда выхода: LOGOUT");
+
+            // Очистка полей ввода
+            document.getElementById('login_username').value = '';
+            document.getElementById('login_password').value = '';
+            document.getElementById('reg_username').value = '';
+            document.getElementById('reg_password').value = '';
+            document.getElementById('join_game_id').value = '';
+
+            // Сброс интерфейса
+            document.getElementById('auth').style.display = 'block';
+            document.getElementById('game_page').style.display = 'none';
+            document.getElementById('game_info').innerHTML = '';
+            document.getElementById('game_board').innerHTML = '';
+            document.getElementById('join_game_section').style.display = 'block';
+            document.getElementById('list_games_section').style.display = 'none';
+            document.getElementById('turn_status').innerText = '';
+            hideChat();
+            alert('Вы успешно вышли.');
+            console.log("Пользователь успешно вышел.");
+        }
+
+        function renderGameBoard(size) {
+            const gameBoardContainer = document.getElementById('game_board');
+            gameBoardContainer.innerHTML = '';
+
+            const table = document.createElement('table');
+            for (let i = 0; i < size; i++) {
+                const row = document.createElement('tr');
+                for (let j = 0; j < size; j++) {
+                    const cell = document.createElement('td');
+                    cell.setAttribute('data-row', i);
+                    cell.setAttribute('data-col', j);
+                    cell.onclick = () => handleCellClick(i, j, cell);
+                    row.appendChild(cell);
+                }
+                table.appendChild(row);
+            }
+
+            gameBoardContainer.appendChild(table);
+            console.log(`Игровое поле ${size}x${size} отрисовано.`);
+        }
+
+        function renderUpdatedGameBoard(size, board) {
+            const gameBoardContainer = document.getElementById('game_board');
+            gameBoardContainer.innerHTML = ''; // Очищаем старое поле
+
+            const table = document.createElement('table');
+            for (let i = 0; i < size; i++) {
+                const row = document.createElement('tr');
+                for (let j = 0; j < size; j++) {
+                    const cell = document.createElement('td');
+                    // Убедимся, что значение ячейки не undefined
+                    cell.innerText = board[i][j] || ' ';
+                    cell.setAttribute('data-row', i);
+                    cell.setAttribute('data-col', j);
+                    cell.onclick = () => handleCellClick(i, j, cell);
+                    row.appendChild(cell);
+                }
+                table.appendChild(row);
+            }
+            gameBoardContainer.appendChild(table);
+            console.log(`Поле ${size}x${size} отрисовано.`);
+        }
+
+
+        function handleCellClick(row, col, cell) {
+            if (!isPlayerTurn) {
+                alert('Сейчас не ваш ход.');
+                return;
+            }
+
+            if (currentBoard[row][col] !== ' ') {
+                alert('Эта клетка уже занята.');
+                return;
+            }
+
+            // Отправляем команду на сервер
+            const moveCommand = `MOVE ${currentGameId} ${playerSymbol} ${row} ${col}`;
+            ws.send(moveCommand);
+            console.log(`Ход отправлен на сервер: ${moveCommand}`);
+
+            // Блокируем ячейку временно, но не обновляем currentBoard
+            cell.innerText = playerSymbol;
+            cell.style.color = "gray"; // Временная отметка, ожидание подтверждения
+            isPlayerTurn = false;
+            updateTurnStatus('оппонента');
+
+            // Сохраняем координаты временного хода для возможного отката
+            lastMove = { row, col, cell };
+        }
+
+
+
+        function updateCell(row, col, symbol) {
+            const gameBoardContainer = document.getElementById('game_board');
+            const table = gameBoardContainer.querySelector('table');
+            if (table) {
+                const targetRow = table.rows[row];
+                if (targetRow) {
+                    const targetCell = targetRow.cells[col];
+                    if (targetCell) {
+                        targetCell.innerText = symbol;
+                        targetCell.style.color = "black"; // Возвращаем цвет
+                    }
+                }
+            }
+        }
+
+        function updateTurnStatus(status) {
+            const turnStatusElement = document.getElementById('turn_status');
+            if (!currentGameId) {
+                turnStatusElement.innerText = ''; // Если игры нет, очищаем статус
+                turnStatusElement.style.color = '';
+                return;
+            }   
+
+            if (status === 'оппонента') {
+                turnStatusElement.innerText = `Ход оппонента`;
+                turnStatusElement.style.color = "red";
+            } else if (status === 'ваш') {
+                turnStatusElement.innerText = "Ваш ход!";
+                turnStatusElement.style.color = "green";
+            } 
+        }
+
+        function initializeGameBoarrd(size) {
+            currentBoard = Array.from({ length: size }, () => Array(size).fill(' '));
+            renderUpdatedGameBoard(size, currentBoard);
+            console.log("Игровое поле инициализировано:", currentBoard);
+        }
+
+        function initializeGameBoard(size) {
+            // Создаем двумерный массив size x size, заполненный пробелами
+            currentBoard = [];
+            for (let i = 0; i < size; i++) {
+                currentBoard.push(Array(size).fill(' '));
+            }
+            console.log("Игровое поле инициализировано:", currentBoard);
+        }
+
+        function resetGame() {
+            currentGameId = null;
+            playerSymbol = null;
+            isPlayerTurn = false;
+            document.getElementById('game_info').innerHTML = '';
+            document.getElementById('game_board').innerHTML = '';
+            document.getElementById('join_game_section').style.display = 'block';
+            document.getElementById('list_games_section').style.display = 'block'; // Показываем список игр
+            document.getElementById('turn_status').innerText = '';
+            //hideChat();
+            startAutoRefreshGames(); // Возобновляем автообновление
+            console.log("Игра сброшена и список игр снова отображается.");
+        }
+
+        // Функция для заполнения таблицы активных игр
+        function populateGamesTable(games) {
+            const tbody = document.getElementById('games_table_body');
+            tbody.innerHTML = ''; // Очистка таблицы
+
+            games.forEach(game => {
+                // Фильтруем игры со статусом 'busy'
+                if (game.status.toLowerCase() === 'busy') {
+                    console.log(`Игра ID ${game.gameId} имеет статус 'busy' и не будет отображена.`);
+                    return; // Пропускаем эту игру
+                }
+
+                const tr = document.createElement('tr');
+                tr.setAttribute('data-game-id', game.gameId); // Устанавливаем атрибут для удобства удаления
+                tr.innerHTML = `
+                    <td>${game.gameId}</td>
+                    <td>${game.creator}</td>
+                    <td>${game.status}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            console.log("Таблица игр обновлена. Строки с статусом 'busy' удалены.");
+        }
+
+        window.onload = connectWebSocket;
+    </script>
+</body>
+</html>
